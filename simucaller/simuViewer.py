@@ -472,7 +472,15 @@ class SeriesLineView(QDialog):
 
         # Create control hbox
         #
+
+        #   Grid check box
+        #
+        self.cb_label = QCheckBox("Show &Label")
+        self.cb_label.setChecked(False)
+        self.cb_label.stateChanged.connect(self.on_draw) #int
+
         control_hbox = QHBoxLayout()
+        control_hbox.addWidget(self.cb_label)
 
         vbox = QVBoxLayout()
         vbox.addWidget(self.mpl_toolbar)
@@ -482,9 +490,16 @@ class SeriesLineView(QDialog):
         self.setLayout(vbox)
 
     def on_draw(self):
-        log.info("draw series lines")
+        self.axes.clear()
+        log.debug("draw series lines")
+        lines = []
         for p, s in zip(self.points, self.points_series):
-            self.axes.plot(s, label=str(p))
+            line = self.axes.plot(s, label=str(p))
+            lines.append(line)
+        if self.cb_label.isChecked():
+            labels = [str(p) for p in self.points]
+            self.axes.legend(labels, loc=2)
+        self.canvas.draw()
     
     def on_pick(self):
         pass
