@@ -1,3 +1,4 @@
+import importlib
 from os import listdir, curdir
 from os.path import join, abspath, exists
 from itertools import product
@@ -40,6 +41,7 @@ class Series(object):
     def __init__(self, hdf5_path, cachedir=CACHE, *args, **kwargs):
         """
         Load Series from hdf5 file.
+
         :hdf5_path: path to related hdf5 file.
         :cachedir: path to cache directory, default current dir.
         """
@@ -48,6 +50,20 @@ class Series(object):
             setattr(self, k, v)
 
         self.cachedir = cachedir
+
+    def save_attr(self):
+        """
+        save self's attributes:
+
+        * break_points
+        * simu_intervals
+
+        to self.h5dict.attrs
+        """
+        for attr in ('break_points', 'simu_intervals'):
+            if hasattr(self, attr):
+                self.h5dict.attrs[attr] = getattr(self, attr)
+        self.h5dict.flush()
 
     def _memoize(self, func, verbose=0):
         '''
@@ -92,6 +108,7 @@ class Series(object):
     def _get_arr2d(self, t, k, axis='xy'):
         """
         return 2d array at the time point t.
+
         :t: (int) time point of 2d array
         :k: (int) index of another dimension, e.g. axis == 'xy', k will means index of 'z' axis
         :axis: (str) the axis of 2d array. like: 'xy'(default), 'yz', 'xz'
@@ -114,13 +131,16 @@ class Series(object):
         self.get_arr2d = self._memoize(self._get_arr2d)
         return self.get_arr2d(*args, **kwargs)
 
-    def set_break_point(self, time):
+    def set_break_points(self, time_interval):
         """
-        set break point(the image index number when event occur)
-        :time: time point when event occur, unit: second
+        set break points(the image index number when event occur)
+        :time_interval: (tuple) time interval when event occur,
+            like: (100, 110)
         """
-        assert 0 <= time <= self.n_images * self.time_interval
-        self.break_point = int(time / self.time_interval)
+        start, end = time_interval
+        assert start >= 0 and end <= self.n_images
+        assert start < end
+        self.break_points = (start, end)
 
     def set_range(self, start, end):
         """
@@ -130,36 +150,80 @@ class Series(object):
         :start: (int) start position of time series
         :end: (int) end position of time series
         """
+        msg = "series range seted (%d, %d),"%(start, end) +\
+              " `get_series`'s behavior will change"
+        log.warning(msg)
         self._mymem.clear()
+        log.info("memory cache clear")
         self.start = start
         self.end = end
 
-    def call_simu(self, algorithm, *args, **kwargs):
+    def set_simu_intervals(self, intervals):
+        """
+        Set the time intervals when simulation
+        :intervals: (list) a list of intervals. like: [(0, 10), (30, 50), (100, 110)]
+        """
+        # check intervals
+        for start, end in intervals:
+            assert start >= 0
+            assert end <= self.n_images - 1
+            assert start < end
+        self.simu_intervals = intervals        
+
+    def call_simu(self, algorithm, name, *args, **kwargs):
         """
         Call simulation region, store result in the dict: self.simu_results
+
         :algorithm: the name of simulation calling method
+        :name: (str) the name of this result
         """
-        import simucaller.call_simu as call_simu
+        log.info("call simulation region using {} algorithm".format(algorithm))
+        calling = importlib.import_module('simucaller.call_simu')
         if not hasattr(self, 'simu_results'):
             self.simu_results = {}
-        alg = getattr(call_simu, algorithm)
-        result = alg(*args, **kwargs)
-        self.simu_results.setdefault(algorithm, [])
-        self.simu_results[algorithm].append(result)
+        alg = getattr(calling, algorithm)
+        result = alg(self, *args, **kwargs)
+        self.simu_results.setdefault(algorithm, {})
+        self.simu_results[algorithm][name] = result
 
-    def save_simu_result(self):
+    def list_simu_result(self):
+        """
+        list all simulation region call result.
+        """
+        res_list = [
+            "%s/%s"%(alg_name, name)
+                for alg_name, alg_group in self.h5dict['simulation_region_call'].items()
+                    for name, _ in alg_group.items()
+        ]
+        return res_list
+
+    def save_simu_result(self, algorithm, name):
         """
         Save simulation region call result to related hdf5 file.
-        """
-        pass
 
-    def load_simu_result(self, algorithm, index):
+        :algorithm: (str) name of algorithm
+        :name: (name) the name of result dataset
+
+        save path:
+            self.h5dict -> simulation_region_call/<algorithm>/<name>
+        """
+        path = "simulation_region_call/{}/{}".format(algorithm, name)
+        result = self.simu_results[algorithm][name]
+        log.info("saving simulation call result to path: {}".format(path))
+        self.h5dict.create_dataset(path, shape=result.shape)
+        log.debug(result.shape)
+        log.debug(type(result))
+        self.h5dict[path][...] = result
+        self.h5dict.flush()
+
+    def get_simu_result(self, algorithm, name):
         """
         Load simulation region call result from hdf5 file.
+
         :algorithm: result's calling method.
-        :index: (int) index number of result.
+        :name: (str) result dataset name.
         """
-        result = self.h5dict['simulation_call_result'][algorithm][str(index)][...]
+        result = self.h5dict['simulation_region_call'][algorithm][name][...]
         return result
 
     @classmethod
@@ -206,3 +270,6 @@ class Series(object):
         log.info("time interval: {}s".format(time_interval))
         h5dict.close() # close hdf5 file
         log.info("Series hdf5 file creating process finished")
+
+    def __del__(self):
+        self.h5dict.close()

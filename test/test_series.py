@@ -31,14 +31,12 @@ def test_Series():
     # loading from hdf5 file
     Series(hdf5, cachedir=cache)
 
-
 def test_get_series():
     """ test Series.get_series method """
     series = Series(hdf5, cachedir=cache)
     s = series.get_series(21, 21, 2)
     log.debug(s.shape)
     assert len(s) == n_images
-
 
 def test_get_arr3d():
     """ test Series.get_arr3d method """
@@ -57,16 +55,21 @@ def test_get_arr2d():
     arr2d = series.get_arr2d(100, 20, axis='xz')
     assert arr2d.shape == (shape[1], shape[2])
 
-def test_set_break_point():
-    """ Serirs.set_break_point """
+def test_set_break_points():
+    """ Serirs.set_break_points """
     series = Series(hdf5, cachedir=cache)
-    series.set_break_point(100)
-    log.debug(series.break_point)
+    series.set_break_points((100, 110))
+    log.debug(series.break_points)
     try:
-        series.set_break_point(time_interval * n_images + 1)
+        series.set_break_points(((n_images + 1), (n_images + 2)))
     except AssertionError as e:
         log.debug(e)
 
+def test_set_simu_intervals():
+    """ Series.set_simu_intervals """
+    series = Series(hdf5, cachedir=cache)
+    series.set_simu_intervals([(100, 110), (130, 140)])
+    log.debug(series.simu_intervals)
 
 def test_set_range():
     """ Series.set_range """
@@ -75,6 +78,23 @@ def test_set_range():
     series.set_range(0, 150)
     assert len(series.get_series(20, 20, 1)) == 150
 
+def test_call_simu():
+    """
+    Series.call_simu
+    Series.save_simu
+    """
+    series = Series(hdf5, cachedir=cache)
+    # test algorithm diff_ttest
+    series.set_break_points((100, 110))
+    series.call_simu('diff_ttest', 'call_0')
+    series.save_simu_result('diff_ttest', 'call_0')
+    # test algorithm ttest
+    series.set_simu_intervals([(28 + i*40, 28 + i*40 + 10) for i in range(8)])
+    series.call_simu('ttest', 'call_1')
+    series.save_simu_result('ttest', 'call_1')
+
+    # save attributes
+    series.save_attr()
 
 #def test_clean():
 #    """ clean all intermedia files """
